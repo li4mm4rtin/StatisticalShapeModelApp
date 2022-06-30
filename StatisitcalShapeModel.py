@@ -25,9 +25,10 @@
 #     i) Integrated support (post-release, needs additional permissions)
 #    ii) Setup support (pre-release)
 #  7) 2 dimension support (pre-release)
-#  8) Skip procrustes scaling (post-release)
+#  8) Skip procrustes scaling (pre-release)
 #  9) Convert filenames to list of numbers using existing code base (pre-release)
 # 10) Display capabilities for all of the procrustes shapes
+# 11) Display shapes by eigVa and eigVe, code at bottom of Mathematica
 
 import json  # Long term data storage, all project files are stored in .json file format
 import natsort  # Better sorting algorith, avoids 1, 10, 11, ..., 19, 2, 20 sorting
@@ -64,6 +65,8 @@ class ShapeModelGUI(object):
         self.polygons = vtk.vtkCellArray()
         self.meanShape = np.empty(1)
         self.namesOfVTKs = []
+
+        self.root = root
 
         # Sets up the frame that is used for the table later on.
         self.tframe = Frame(root, width=450, height=225)
@@ -308,14 +311,14 @@ class ShapeModelGUI(object):
     # "Heavy lifter" function, does the PCA analysis. PC scores calculated here.
     def principalComponentAnalysis(self):
         PCA_win = Toplevel(self.root)
-        PCA_win.geometry('750x250')
+        PCA_win.geometry('200x100')
         PCA_win.title('Principal Component Analysis Progress')
 
         PCA_win.principalComponentProgressBar = ttk.Progressbar(
             PCA_win,
             orient='horizontal',
             mode='determinate',
-            length=700
+            length=180
         )
 
         PCA_win.principalComponentProgressBar.grid(column=0, row=0, columnspan=2, padx=10, pady=10)
@@ -404,6 +407,7 @@ class ShapeModelGUI(object):
                     "dataVariation": self.dataVariation.tolist(),
                     "PCScores": self.PCScores.tolist(),
                     "meanShape": self.meanShape.tolist(),
+                    "sigModes": self.sigModes,
                     "polygonData": polygonData.tolist()
                     }
 
@@ -427,6 +431,7 @@ class ShapeModelGUI(object):
                 self.dataVariation = np.array(list(data["dataVariation"]))
                 self.PCScores = np.array(list(data["PCScores"]))
                 self.meanShape = np.array(list(data["meanShape"]))
+                self.sigModes = data["sigModes"]
                 self.polygons.SetData(3, vtk.util.numpy_support.numpy_to_vtk(np.array(list(data["polygonData"]))))
 
         self.clearData()
