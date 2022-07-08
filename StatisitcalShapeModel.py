@@ -1,13 +1,14 @@
-# Authors: Liam Martin, Nicholas Pho, Micheal Clancy, Megan Routzong
+# Authors: Liam Martin, Nicholas Pho, Michael Clancy, Steven Abramowitch, Megan Routzong
 # Purpose: Calculates and returns significant modes of variation of a set of point clouds using a principal component
-# analysis. Only functions with .vtk file types (others to be added). Based on Mathematica script (developed by Megan
-# Routzong and Steven Abramowitch) to allow for better data and method sharing between research groups.
+# analysis. Only functions with .vtk file types. Based on Mathematica script (developed by Megan Routzong and Steven
+# Abramowitch) to allow for better data and method sharing between research groups.
 # Date of Last Edit: 6/29/22 - Liam Martin
 
 # Future Feature List:
 # 1) Full graphing support (Pre-release)
 #     i) Normal distribution plots
 #    ii) Save plots
+#   iii) Color mapping on shapes based on deviation
 # 2) Statistical analysis (Pre-release)
 #     i) Assigning of Groups
 #    ii) ANOVA
@@ -16,26 +17,29 @@
 #  3) Add table handling for patient data (Pre-release)
 #     i) Age
 #    ii) Parity
-#  3) Other filetype support
+#  4) Other filetype support
 #     i) Other filetypes (post-release)
 #    ii) New vtk file format (pre-release)
-#  4) Table size dynamically change with window (Pre-release)
-#  5) Set random variation at constant variation (Pre-release)
-#  6) Deformetrica support
+#  5) Table size dynamically change with window (Pre-release)
+#  6) Set random variation at constant variation (Pre-release)
+#  7) Deformetrica support
 #     i) Integrated support (post-release, needs additional permissions)
 #    ii) Setup support (pre-release)
-#  7) 2 dimension support (pre-release)
-#  8) Skip procrustes scaling (pre-release)
-#  9) Convert filenames to list of numbers using existing code base (pre-release)
-# 10) Display capabilities for all of the procrustes shapes
-# 11) Display shapes by eigVa and eigVe, code at bottom of Mathematica
+#   iii) Assessing deformetrica fit
+#  8) 2 dimension support (pre-release)
+#  9) Skip procrustes scaling (pre-release)
+# 10) Convert filenames to list of numbers using existing code base (pre-release)
+# 11) Display capabilities for all of the procrustes shapes
+# 12) Display shapes by eigVa and eigVe, code at bottom of Mathematica
+# 13) Integrate TICP code
 
 import json  # Long term data storage, all project files are stored in .json file format
-import natsort  # Better sorting algorith, avoids 1, 10, 11, ..., 19, 2, 20 sorting
+import natsort  # Better sorting algorithm, avoids 1, 10, 11, ..., 19, 2, 20 sorting
 import tkinter.filedialog  # GUI toolkit
 import tkinter.messagebox
 from tkinter import *
 from tkinter import ttk
+
 from tkintertable import TableCanvas, TableModel  # tkinter table, what shows up in display
 import os  # Filepath editing
 import numpy as np  # Matrices
@@ -45,6 +49,9 @@ from vtkmodules.vtkRenderingCore import (vtkActor, vtkPolyDataMapper, vtkRenderW
                                          vtkRenderer)
 from sklearn.decomposition import PCA  # Principal component analysis
 import matplotlib.pyplot as plt  # Plots
+import pandas
+import scipy.stats
+from scipy import stats
 
 # Global variables.
 dimensions = 3
@@ -65,6 +72,7 @@ class ShapeModelGUI(object):
         self.polygons = vtk.vtkCellArray()
         self.meanShape = np.empty(1)
         self.namesOfVTKs = []
+        self.tableDict = {}
 
         self.root = root
 
@@ -88,7 +96,9 @@ class ShapeModelGUI(object):
         self.fileMainMenu.add_separator()
         self.fileMainMenu.add_command(label="Import Data", command=self.dataImporter)
         self.fileMainMenu.add_separator()
-        self.fileMainMenu.add_command(label="Exit", command=self.quiter)
+        self.fileMainMenu.add_command(label="Exit", command=self.quitter)
+        self.fileMainMenu.add_separator()
+        self.fileMainMenu.add_command(label="Clear Table", command=self.clearTable)
         self.mainMenuBar.add_cascade(label="File", menu=self.fileMainMenu)
 
         # All of the procrustes menu options and calls.
@@ -104,13 +114,21 @@ class ShapeModelGUI(object):
         # All of the file PCA options and calls.
         self.principalComponentMenuBar = Menu(self.mainMenuBar, tearoff=0)
         self.principalComponentMenuBar.add_command(
-                                    label="Run Principal Component Analysis", command=self.principalComponentAnalysis
+            label="Run Principal Component Analysis", command=self.principalComponentAnalysis
         )
         self.principalComponentMenuBar.add_separator()
         self.principalComponentMenuBar.add_command(
-                                    label="Show Scree Plot", command=self.screePlot
+            label="Show Scree Plot", command=self.screePlot
         )
         self.mainMenuBar.add_cascade(label="Principal Component Analysis", menu=self.principalComponentMenuBar)
+
+        self.statisticsMenuBar = Menu(self.mainMenuBar, tearoff=0)
+        self.statisticsMenuBar.add_command(label="T-test", command=self.stats_ttest)
+        self.statisticsMenuBar.add_command(label="ANOVA", command=None)
+        self.statisticsMenuBar.add_separator()
+        self.statisticsMenuBar.add_command(label='Display Distribution of Modes of Variation',
+                                           command=None)
+        self.mainMenuBar.add_cascade(label="Statistics", menu=self.statisticsMenuBar)
 
         # Initializes the menubar
         root.config(menu=self.mainMenuBar)
@@ -248,7 +266,8 @@ class ShapeModelGUI(object):
         procrustes_Win.procrustesProgressBar.update()
 
         pcaNorm = PCA(n_components=dimensions)
-        x = pcaNorm.fit_transform(np.reshape(self.importedData.flatten(), (nLandmarks * len(self.importedData), dimensions)))
+        x = pcaNorm.fit_transform(
+            np.reshape(self.importedData.flatten(), (nLandmarks * len(self.importedData), dimensions)))
         x[:, 1:3] = x[:, 1:3] * -1
 
         partiMatrix = np.reshape(x, (len(self.importedData), dimensions * nLandmarks))
@@ -304,8 +323,9 @@ class ShapeModelGUI(object):
         for i in range(len(self.namesOfVTKs)):
             filename = os.path.join(
                 os.path.dirname(
-                    self.namesOfVTKs[i]), os.path.basename(self.namesOfVTKs[i])[:-4] +
-                                          '_procrustes' + os.path.basename(self.namesOfVTKs[i])[-4:])
+                    self.namesOfVTKs[i]),
+                os.path.basename(
+                    self.namesOfVTKs[i])[:-4] + '_procrustes' + os.path.basename(self.namesOfVTKs[i])[-4:])
             self.exportShape(partiMatrix[i], False, filename)
 
     # "Heavy lifter" function, does the PCA analysis. PC scores calculated here.
@@ -399,17 +419,18 @@ class ShapeModelGUI(object):
         polygonData = np.delete(vtk.util.numpy_support.vtk_to_numpy(self.polygons.GetData()), slice(None, None, 4))
 
         savingData = {
-                    "version": version,
-                    "namesOfVTKs": self.namesOfVTKs,
-                    "rawData": self.importedData.tolist(),
-                    "scaledData": self.scaledData.tolist(),
-                    "randomVariation": self.randomVariation.tolist(),
-                    "dataVariation": self.dataVariation.tolist(),
-                    "PCScores": self.PCScores.tolist(),
-                    "meanShape": self.meanShape.tolist(),
-                    "sigModes": self.sigModes,
-                    "polygonData": polygonData.tolist()
-                    }
+            "version": version,
+            "namesOfVTKs": self.namesOfVTKs,
+            "rawData": self.importedData.tolist(),
+            "scaledData": self.scaledData.tolist(),
+            "randomVariation": self.randomVariation.tolist(),
+            "dataVariation": self.dataVariation.tolist(),
+            "PCScores": self.PCScores.tolist(),
+            "meanShape": self.meanShape.tolist(),
+            "sigModes": self.sigModes,
+            "polygonData": polygonData.tolist(),
+            "tableData": self.table.model.data
+        }
 
         files = [('JSON File', '*.json')]
         file = tkinter.filedialog.asksaveasfilename(filetypes=files, defaultextension='json')
@@ -433,27 +454,31 @@ class ShapeModelGUI(object):
                 self.meanShape = np.array(list(data["meanShape"]))
                 self.sigModes = data["sigModes"]
                 self.polygons.SetData(3, vtk.util.numpy_support.numpy_to_vtk(np.array(list(data["polygonData"]))))
+                self.tableDict = data["tableData"]
 
-        self.clearData()
-        self.table.clearData()
-        self.table.update()
+        if self.table.model.getColumnCount() > 0:
+            self.savePrompt(prompt='Load Data')
+            self.clearData()
+            self.clearTable()
 
         files = [('JSON File', '*.json')]
         file = tkinter.filedialog.askopenfilename(filetypes=files, defaultextension='json')
         loadFromJSONFile(file)
 
         self.initTable()
-        self.displayModes()
+
+    def savePrompt(self, prompt):
+        shouldSave = tkinter.messagebox.askyesno(prompt, 'Do you want to save the current dataset?')
+
+        if shouldSave:
+            self.saveData()
 
     # Create new dataset.
     def newDataset(self):
-        saveOrNo = tkinter.messagebox.askyesno('New Dataset', 'Do you want to save the current dataset?')
-
-        if saveOrNo:
-            self.saveData()
-
+        self.savePrompt(prompt='New Dataset')
         self.table.clearData()
         self.clearData()
+        self.clearTable()
 
     # Sets all data based variables to empty variables. Only call during resets.
     def clearData(self):
@@ -470,11 +495,8 @@ class ShapeModelGUI(object):
         print(self.scaledData)
 
     # Quits program.
-    def quiter(self):
-        saveOrNo = tkinter.messagebox.askyesno('New Dataset', 'Do you want to save the current dataset?')
-
-        if saveOrNo:
-            self.saveData()
+    def quitter(self):
+        self.savePrompt('Save Dataset')
 
         self.root.quit()
         self.root.destroy()
@@ -483,7 +505,7 @@ class ShapeModelGUI(object):
     def exportShape(self, pointCloud, isAverageShape, exportedShapeFilename):
         if isAverageShape:
             exportedShapeFilename = tkinter.filedialog.asksaveasfilename(
-                                                            filetypes=[('VTK Files', '*.vtk')], defaultextension='vtk')
+                filetypes=[('VTK Files', '*.vtk')], defaultextension='vtk')
 
         points = vtk.vtkPoints()
         points.SetNumberOfPoints(len(pointCloud))
@@ -503,13 +525,19 @@ class ShapeModelGUI(object):
 
     # Initializes the table.
     def initTable(self):
-        namesOfVTKs_Dict = {}
+        if self.tableDict != {}:
+            model = self.table.model
+            model.importDict(self.tableDict)
+        else:
+            namesOfVTKs_Dict = {}
 
-        for i in range(len(self.namesOfVTKs)):
-            namesOfVTKs_Dict['rec' + str(i + 1)] = {"Filenames": os.path.basename(self.namesOfVTKs[i])}
+            for i in range(len(self.namesOfVTKs)):
+                namesOfVTKs_Dict['rec' + str(i + 1)] = {"Filenames": os.path.basename(self.namesOfVTKs[i])}
 
-        model = self.table.model
-        model.importDict(namesOfVTKs_Dict)
+            model = self.table.model
+            model.importDict(namesOfVTKs_Dict)
+            self.displayModes()
+
         self.table.show()
 
     # Adds modes of variation to the table.
@@ -519,6 +547,54 @@ class ShapeModelGUI(object):
             self.table.addColumn("Mode " + str(j + 1))
             for k in range(len(self.namesOfVTKs)):
                 self.table.model.setValueAt(str(round(self.PCScores[k][j], 2)), k, existingCols)
+
+    def clearTable(self):
+        self.tframe.destroy()
+        self.tframe = Frame(self.root, width=450, height=225)
+        self.tframe.pack()
+        self.table = TableCanvas(self.tframe, rows=0, cols=0)
+
+    def stats_ttest(self):
+        ttestWin = Toplevel(self.root)
+        ttestWin.geometry("500x500")
+        ttestWin.title('T-Test Menu')
+        cols = []
+
+        for i in range(self.table.model.getColumnCount()):
+            cols.append(self.table.model.getColumnName(i))
+
+        StatDataFrame = pandas.DataFrame.from_dict(self.table.model.data).transpose()
+        StatDataFrame.groupby('Category')
+
+        def valueGetter(temp):
+            out = []
+            for j in range(len(temp)):
+                out.append(float(temp['Mode 1'][j]))
+            return out
+
+        group1 = StatDataFrame[StatDataFrame['Category'] == '1']
+        group2 = StatDataFrame[StatDataFrame['Category'] == '0']
+
+        group1 = valueGetter(group1)
+        group2 = valueGetter(group2)
+
+    def getDummyVar(self, window):
+        dummyCols = []
+        cols = self.table.model.getColumnCount()
+        for i in range(cols):
+            name = self.table.model.getColumnName(i)
+            if name != 'Filenames' and not name.startswith('Mode'):
+                dummyCols.append(name)
+
+        theDummyCol = StringVar(window)
+        dropDown = OptionMenu(window, theDummyCol, *dummyCols)
+        dropDown.grid(column=1, row=0)
+
+        def selectedCol():
+            self.colName = theDummyCol.get()
+
+        selectButton = Button(window, text="Set Dummy Variable", command=selectedCol)
+        selectButton.grid(column=0, row=1)
 
 
 if __name__ == '__main__':
